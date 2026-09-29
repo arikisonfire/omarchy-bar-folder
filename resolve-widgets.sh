@@ -17,10 +17,10 @@
 # `serviceUrl` is set for third-party plugins that also declare a service,
 # but only while the shell does not run that service itself (the plugin is
 # neither in the bar layout nor in `plugins`). Bar Folder then runs it, so
-# there is always exactly one instance. Services the shell treats specially
-# are never hosted: `keepLoaded` ones and clones of first-party plugins with
-# the `authentication` capability (lock, polkit), which the shell keeps
-# isolated from every plugin.
+# there is always exactly one instance. Bar Folder itself is `keepLoaded`, so
+# hosted services with the same flag retain their promised hot-reload lifetime.
+# Clones of first-party plugins with the `authentication` capability (lock,
+# polkit) are never hosted; the shell keeps them isolated from every plugin.
 
 set -euo pipefail
 
@@ -49,7 +49,6 @@ emit() {
         path: ($dir + "/" + .entryPoints.barWidget),
         servicePath: (if (.kinds | index("service") != null) and (.entryPoints.service | type == "string")
           then $dir + "/" + .entryPoints.service else "" end),
-        keepLoaded: (.keepLoaded == true),
         manifest: (if (.kinds | index("service") != null) then . else null end)
       }' "$file" 2>/dev/null || true
 }
@@ -113,7 +112,6 @@ jq -n --argjson catalog "$catalog" --argjson authentication "${authentication:-[
               end)) as $hit
          | if $hit
            then ((($hit.firstParty | not) and $hit.servicePath != ""
-                  and ($hit.keepLoaded | not)
                   and ($hit.clonedFrom | IN($authentication[]) | not)
                   and ($hit.id | IN($referenced[]) | not)) as $hosted
                  | {id: $id, pluginId: $hit.id, url: ($hit.path | file_url), name: $hit.name, builtin: false,

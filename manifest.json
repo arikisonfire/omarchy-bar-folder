@@ -11,6 +11,7 @@
     "service",
     "bar-widget"
   ],
+  "keepLoaded": true,
   "entryPoints": {
     "service": "FolderService.qml",
     "barWidget": "BarFolder.qml"
