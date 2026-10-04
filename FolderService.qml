@@ -92,7 +92,7 @@ Item {
       var instance = component.createObject(null)
       if (!instance) {
         console.warn("Bar Folder: could not create the service of " + id)
-        if (facade) facade.destroy()
+        safeDestroy(facade)
         return
       }
       if ("omarchyPath" in instance) instance.omarchyPath = root.omarchyPath
@@ -108,14 +108,19 @@ Item {
     else finalize()
   }
 
+  // Parentless services can already be gone at teardown, leaving a wrapper without destroy().
+  function safeDestroy(o) {
+    if (o && typeof o.destroy === "function") o.destroy()
+  }
+
   function stop(id) {
     var entry = root.services[id]
     var next = ({})
     for (var key in root.services) if (key !== id) next[key] = root.services[key]
     root.services = next
     if (!entry) return
-    if (entry.instance) entry.instance.destroy()
-    if (entry.shell) entry.shell.destroy()
+    safeDestroy(entry.instance)
+    safeDestroy(entry.shell)
   }
 
   Connections {
@@ -136,8 +141,8 @@ Item {
     root.shuttingDown = true
     for (var id in root.services) {
       var entry = root.services[id]
-      if (entry && entry.instance) entry.instance.destroy()
-      if (entry && entry.shell) entry.shell.destroy()
+      if (entry) safeDestroy(entry.instance)
+      if (entry) safeDestroy(entry.shell)
     }
   }
 
@@ -152,7 +157,7 @@ Item {
       property var instance: null
       readonly property var appLibrary: null
       readonly property var bar: null
-      readonly property var barConfig: root.shell ? root.shell.barConfig : ({})
+      readonly property var barConfig: root && root.shell ? root.shell.barConfig : ({})
       readonly property var idleConfig: ({})
 
       function owns(id) { return String(id || "") === pluginId }
