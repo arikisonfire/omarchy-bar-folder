@@ -678,6 +678,9 @@ Panel {
               readonly property bool highlighted: mouse.containsMouse
                 || (root.cursorActive && root.selectedIndex === tile.index)
               readonly property bool lit: !!host && (host.active || host.opened)
+              readonly property bool dimmed: !tile.failed && host.dimmed && !tile.lit
+              // No glyph, but a drawn bar icon: the tile shows the drawing.
+              readonly property bool drawn: !tile.failed && !host.glyph && !!host.iconComponent
               readonly property string title: root.titleFor(modelData)
               readonly property string glyph: {
                 if (tile.failed) return "󰀦"
@@ -716,11 +719,25 @@ Panel {
 
                 Text {
                   anchors.centerIn: parent
+                  visible: !tile.drawn
                   text: tile.glyph
                   textFormat: Text.PlainText
                   color: tile.failed ? Color.urgent : (tile.lit ? Color.popups.background : Color.popups.text)
+                  opacity: tile.dimmed ? 0.45 : 1
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.iconLarge
+                }
+
+                // The widget's own bar icon, on the bar's icon canvas and
+                // scaled by the same ratio as a glyph from bar to tile.
+                Loader {
+                  anchors.centerIn: parent
+                  active: tile.drawn
+                  width: Style.bar.iconCanvas
+                  height: Style.bar.iconCanvas
+                  scale: Style.font.iconLarge / Style.bar.iconFont
+                  opacity: tile.dimmed ? 0.45 : 1
+                  sourceComponent: tile.drawn ? tile.host.iconComponent : null
                 }
               }
 
@@ -864,11 +881,24 @@ Panel {
           anchors.centerIn: parent
           spacing: Style.space(8)
 
+          Loader {
+            readonly property var ghost: parent.parent
+            anchors.verticalCenter: parent.verticalCenter
+            active: !!ghost.host && !ghost.host.glyph && !!ghost.host.iconComponent
+            visible: active
+            width: Style.bar.iconCanvas
+            height: Style.bar.iconCanvas
+            scale: Style.font.icon / Style.bar.iconFont
+            sourceComponent: active ? ghost.host.iconComponent : null
+          }
+
           Text {
             anchors.verticalCenter: parent.verticalCenter
+            visible: text !== ""
             text: {
               var ghost = parent.parent
               if (ghost.host && ghost.host.glyph) return ghost.host.glyph
+              if (ghost.host && ghost.host.iconComponent) return ""
               var id = ghost.item ? ghost.item.id : ""
               return root.icons && root.icons[id] ? String(root.icons[id]) : "\udb81\udc31"
             }

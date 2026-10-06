@@ -71,6 +71,11 @@ Item {
     if (widgetId === "builtin.notifications") return notifications.dnd
     return primaryTarget ? primaryTarget.active === true : false
   }
+  // Widgets that draw their bar icon (a logo, say) rather than use a glyph;
+  // the tile shows that drawing when there is no glyph to find.
+  readonly property var iconComponent: primaryTarget && primaryTarget.iconComponent ? primaryTarget.iconComponent : null
+  // Greyed out on the bar, the stock "off" look; the tile follows.
+  readonly property bool dimmed: primaryTarget ? primaryTarget.dimmed === true : false
   readonly property bool opened: widget ? widget.opened === true : false
   readonly property string status: {
     if (widgetId === "builtin.notifications") return notifications.dnd ? "Do Not Disturb" : "On"
