@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 
 // One widget inside Bar Folder. A bar widget is instantiated from its own
 // entry point, invisible and zero-width underneath the folder icon, so its
@@ -243,10 +244,10 @@ Item {
     readonly property string pluginId: root.widgetId
     readonly property string moduleName: root.widgetId
 
-    readonly property color foreground: root.realBar ? root.realBar.foreground : Color.foreground
-    readonly property color barForeground: root.realBar ? root.realBar.barForeground : Color.foreground
-    readonly property color background: root.realBar ? root.realBar.background : Color.background
-    readonly property color urgent: root.realBar ? root.realBar.urgent : Color.urgent
+    readonly property color foreground: root.realBar ? root.realBar.foreground : Commons.Color.foreground
+    readonly property color barForeground: root.realBar ? root.realBar.barForeground : Commons.Color.foreground
+    readonly property color background: root.realBar ? root.realBar.background : Commons.Color.background
+    readonly property color urgent: root.realBar ? root.realBar.urgent : Commons.Color.urgent
     readonly property string fontFamily: root.realBar ? root.realBar.fontFamily : Style.font.family
     readonly property string position: root.realBar ? root.realBar.position : "top"
     readonly property bool vertical: root.realBar ? root.realBar.vertical === true : false

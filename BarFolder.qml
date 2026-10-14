@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Ui
 import qs.Commons
+import qs.Commons as Commons
 
 // Bar Folder: a simple folder for bar icons. One icon on the bar; its panel
 // shows a tile per widget inside. Clicking a tile opens that widget's own
@@ -517,9 +518,9 @@ Panel {
     height: Math.min(button.height, Style.bar.iconSlot)
     radius: Style.cornerRadius > 0 ? height / 2 : 0
     visible: root.barDragging && root.barDragId !== ""
-    color: Util.alpha(Color.accent, root.barDropHover ? 0.35 : 0.12)
+    color: Util.alpha(Commons.Color.accent, root.barDropHover ? 0.35 : 0.12)
     border.width: root.barDropHover ? Math.max(1, Style.space(1)) : 0
-    border.color: Color.accent
+    border.color: Commons.Color.accent
 
     Behavior on color { ColorAnimation { duration: 90 } }
   }
@@ -593,7 +594,7 @@ Panel {
 
         Text {
           text: "Bar Folder"
-          color: Color.popups.text
+          color: Commons.Color.popups.text
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.title
           font.bold: true
@@ -609,7 +610,7 @@ Panel {
             width: parent.width
             wrapMode: Text.WordWrap
             text: "Keep your bar tidy. Move these icons into the folder? You can drag icons in and out at any time."
-            color: Color.popups.text
+            color: Commons.Color.popups.text
             opacity: 0.8
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.bodySmall
@@ -620,7 +621,7 @@ Panel {
             wrapMode: Text.WordWrap
             text: root.defaultTitles().join("  ·  ")
             textFormat: Text.PlainText
-            color: Color.popups.text
+            color: Commons.Color.popups.text
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.bodySmall
             font.bold: true
@@ -652,7 +653,7 @@ Panel {
           width: parent.width
           wrapMode: Text.WordWrap
           text: "The folder is empty. Drag an icon from the bar onto the folder icon to add it."
-          color: Color.popups.text
+          color: Commons.Color.popups.text
           opacity: 0.7
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.bodySmall
@@ -699,9 +700,9 @@ Panel {
               clip: true
               radius: Style.cornerRadius
               opacity: tile.dragged ? 0.35 : 1
-              color: Util.alpha(Color.popups.text, tile.highlighted && root.tileDragIndex < 0 ? 0.13 : 0.06)
+              color: Util.alpha(Commons.Color.popups.text, tile.highlighted && root.tileDragIndex < 0 ? 0.13 : 0.06)
               border.width: tile.dropTarget || (root.cursorActive && root.selectedIndex === tile.index) ? Math.max(1, Style.space(1)) : 0
-              border.color: Color.accent
+              border.color: Commons.Color.accent
 
               Behavior on color { ColorAnimation { duration: 120 } }
 
@@ -713,7 +714,7 @@ Panel {
                 width: Style.space(34)
                 height: width
                 radius: Style.cornerRadius > 0 ? width / 2 : 0
-                color: tile.lit ? Color.accent : Util.alpha(Color.popups.text, 0.12)
+                color: tile.lit ? Commons.Color.accent : Util.alpha(Commons.Color.popups.text, 0.12)
 
                 Behavior on color { ColorAnimation { duration: 120 } }
 
@@ -722,7 +723,7 @@ Panel {
                   visible: !tile.drawn
                   text: tile.glyph
                   textFormat: Text.PlainText
-                  color: tile.failed ? Color.urgent : (tile.lit ? Color.popups.background : Color.popups.text)
+                  color: tile.failed ? Commons.Color.urgent : (tile.lit ? Commons.Color.popups.background : Commons.Color.popups.text)
                   opacity: tile.dimmed ? 0.45 : 1
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.iconLarge
@@ -756,7 +757,7 @@ Panel {
                   wrapMode: Text.NoWrap
                   maximumLineCount: 1
                   elide: Text.ElideRight
-                  color: Color.popups.text
+                  color: Commons.Color.popups.text
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.body
                   font.bold: true
@@ -770,7 +771,7 @@ Panel {
                   wrapMode: Text.NoWrap
                   maximumLineCount: 1
                   elide: Text.ElideRight
-                  color: Color.popups.text
+                  color: Commons.Color.popups.text
                   opacity: 0.65
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.caption
@@ -835,7 +836,7 @@ Panel {
           horizontalAlignment: Text.AlignHCenter
           elide: Text.ElideRight
           text: root.tileDragIndex >= 0 ? "Drop on the bar to take it out" : "Drag tiles to reorder or out to the bar"
-          color: Color.popups.text
+          color: Commons.Color.popups.text
           opacity: 0.45
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.caption
@@ -849,7 +850,7 @@ Panel {
           ? keyCatcher.mapFromItem(null, target.x, target.y) : Qt.point(0, 0)
         visible: root.tileDragIndex >= 0 && !!target && target.kind === "bar"
         z: 100
-        color: Color.accent
+        color: Commons.Color.accent
         width: target && target.vertical ? target.length : Math.max(2, Style.space(2))
         height: target && target.vertical ? Math.max(2, Style.space(2)) : (target ? target.length : 0)
         x: target && target.vertical ? at.x : at.x - width / 2
@@ -871,9 +872,9 @@ Panel {
         width: ghostRow.implicitWidth + Style.space(16)
         height: Style.space(34)
         radius: Style.cornerRadius
-        color: Color.popups.background
+        color: Commons.Color.popups.background
         border.width: Math.max(1, Style.space(1))
-        border.color: Color.accent
+        border.color: Commons.Color.accent
         opacity: 0.95
 
         Row {
@@ -903,7 +904,7 @@ Panel {
               return root.icons && root.icons[id] ? String(root.icons[id]) : "\udb81\udc31"
             }
             textFormat: Text.PlainText
-            color: Color.popups.text
+            color: Commons.Color.popups.text
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.icon
           }
@@ -917,7 +918,7 @@ Panel {
               return ghost.item && ghost.item.builtin ? title + "  \u2192 remove" : title + "  \u2192 bar"
             }
             textFormat: Text.PlainText
-            color: Color.popups.text
+            color: Commons.Color.popups.text
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.bodySmall
             font.bold: true
