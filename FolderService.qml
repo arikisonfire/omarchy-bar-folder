@@ -1,4 +1,4 @@
-import QtQuick
+import QtQuick 6.11
 import Quickshell
 
 // Runs the services of plugins that live inside the folder.
