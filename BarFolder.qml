@@ -43,13 +43,37 @@ Panel {
 
   readonly property bool configured: root.settings !== null && root.settings !== undefined
     && root.settings.widgets !== undefined && root.settings.widgets !== null
-  readonly property var widgetIds: {
+  // The tiles, in order. A plain id keeps its inline bar settings in
+  // widgetSettings[id] (as before 1.2.0); a widget that came in again (one tray
+  // widget per tray app, say) is an object like a bar entry, {id, ...settings}.
+  // Tiles are addressed by position, so several of one widget stay apart.
+  readonly property var folderItems: {
     // Settings arrays arrive as QML lists, which Array.isArray rejects.
     var value = root.setting("widgets", [])
-    var ids = []
-    if (value && typeof value !== "string" && value.length !== undefined)
-      for (var i = 0; i < value.length; i++) ids.push(String(value[i]))
-    return ids
+    var items = []
+    if (value && typeof value !== "string" && value.length !== undefined) {
+      for (var i = 0; i < value.length; i++) {
+        var element = value[i]
+        if (element && typeof element === "object") {
+          var settings = JSON.parse(JSON.stringify(element))
+          var id = String(settings.id || "")
+          delete settings.id
+          items.push({ id: id, own: true, settings: settings })
+        } else {
+          items.push({ id: String(element), own: false, settings: null })
+        }
+      }
+    }
+    return items
+  }
+  readonly property var widgetIds: folderItems.map(function(item) { return item.id })
+
+  // The inline bar settings of the tile at `index`.
+  function settingsAt(index) {
+    var item = root.folderItems[index]
+    if (!item) return ({})
+    if (item.own) return item.settings
+    return root.widgetSettings && root.widgetSettings[item.id] ? root.widgetSettings[item.id] : ({})
   }
   readonly property var labels: root.setting("labels", ({}))
   readonly property var icons: root.setting("icons", ({}))
@@ -58,6 +82,7 @@ Panel {
 
   property var resolved: []
   property string resolvedKey: ""
+  property string resolvingKey: ""
   // Our own service (FolderService.qml), which runs the services of the
   // plugins inside the folder. The shell creates it once for all bars.
   readonly property var folderService: root.bar && root.bar.shell
@@ -98,40 +123,62 @@ Panel {
     for (var i = 0; i < lines.length && !line; i++) line = lines[i].trim()
     var prefix = String(title || "") + " · "
     if (title && line.indexOf(prefix) === 0 && line.length > prefix.length) line = line.slice(prefix.length)
+    // A status that only repeats the title says nothing.
+    if (title && line === String(title)) return ""
     return line
   }
 
+  // A widget list that changes while the resolver still runs is resolved
+  // again when that run ends (onStreamFinished), so the tiles never stay on
+  // the older list.
   function resolveWidgets() {
     var key = JSON.stringify(root.widgetIds)
-    if (key === root.resolvedKey) return
-    root.resolvedKey = key
+    if (key === root.resolvedKey || resolver.running) return
     if (root.widgetIds.length === 0) {
+      root.resolvedKey = key
       root.resolved = []
       return
     }
+    root.resolvingKey = key
     var script = String(Qt.resolvedUrl("resolve-widgets.sh")).replace(/^file:\/\//, "")
     resolver.command = [script].concat(root.widgetIds)
     resolver.running = true
   }
 
-  function persistWidgetSettings(id, values) {
-    var entry = {}
-    for (var key in root.settings) if (key !== "id") entry[key] = root.settings[key]
-    var nested = {}
-    var current = root.widgetSettings || {}
-    for (var other in current) nested[other] = current[other]
-    nested[id] = values
-    entry.widgetSettings = nested
+  // A hosted widget saved its inline settings: into its own object when it is
+  // a further instance, else into widgetSettings[id].
+  function persistWidgetSettings(index, values) {
+    var item = root.folderItems[index]
+    if (!item) return
+    var entry = JSON.parse(JSON.stringify(root.settings || {}))
+    delete entry.id
+    var clean = {}
+    for (var key in values) if (key !== "id") clean[key] = values[key]
+    if (item.own) {
+      var widgets = entry.widgets && typeof entry.widgets !== "string" && entry.widgets.length !== undefined ? entry.widgets : []
+      if (index >= widgets.length) return
+      var replaced = { id: item.id }
+      for (var name in clean) replaced[name] = clean[name]
+      widgets[index] = replaced
+      entry.widgets = widgets
+    } else {
+      var nested = entry.widgetSettings && typeof entry.widgetSettings === "object" ? entry.widgetSettings : {}
+      nested[item.id] = clean
+      entry.widgetSettings = nested
+    }
     root.settings = entry
     if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
       root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
 
-  function titleFor(item) {
+  function titleFor(item, host) {
     if (!item) return ""
     var id = String(item.id)
     if (root.labels && root.labels[id]) return String(root.labels[id])
     if (root.defaultLabels[id]) return root.defaultLabels[id]
+    // A widget may name its tile, e.g. a tray widget that shows one app.
+    var own = host && host.widget && typeof host.widget.tileTitle === "string" ? host.widget.tileTitle : ""
+    if (own) return own
     return String(item.name || id)
   }
 
@@ -165,12 +212,17 @@ Panel {
 
   // ---- layout changes -----------------------------------------------------
 
-  function runLayout(args) {
+  function runLayout(args, environment) {
     // Detached with a short delay: the bar applies its own drop (and may
     // rebuild this widget) first, and the edit must survive that rebuild.
     var script = String(Qt.resolvedUrl("layout.sh")).replace(/^file:\/\//, "")
-    Quickshell.execDetached(["sh", "-c", "sleep 0.35; exec \"$0\" \"$@\"", script].concat(args))
+    var command = ["sh", "-c", "sleep 0.35; exec \"$0\" \"$@\"", script].concat(args)
+    // Settings travel in the environment, never as arguments: other local
+    // accounts can read a process's arguments in /proc, not its environment.
+    if (environment) Quickshell.execDetached({ command: command, environment: environment })
+    else Quickshell.execDetached(command)
   }
+
 
   // ---- bar icon -> folder ---------------------------------------------------
   // The bar has no drag API for widgets, but every module slot exposes
@@ -184,6 +236,11 @@ Panel {
   // its own drop, which nulls the slot reference before we see the release.
   property bool barDragging: false
   property string barDragId: ""
+  // The dragged layout entry as JSON. A widget that allows several instances
+  // (e.g. one tray widget per icon) has several entries with the same id, and
+  // only the dragged one may move into the folder. layout.sh gets it in its
+  // environment (BAR_FOLDER_ENTRY).
+  property string barDragEntry: ""
   property bool barDropHover: false
 
   function isModuleSlot(item) {
@@ -245,17 +302,48 @@ Panel {
     root.barDragging = true
     root.barDragSlot = slot
     root.barDragId = slot.customType ? "" : String(slot.moduleName || "")
+    var entry = slot.entry
+    root.barDragEntry = entry && typeof entry === "object" ? JSON.stringify(entry) : ""
   }
 
   function finishBarDrag() {
     var id = root.barDragId
+    var entry = root.barDragEntry
     var dropped = root.barDropHover
     root.barDragging = false
     root.barDragSlot = null
     root.barDragId = ""
+    root.barDragEntry = ""
     root.barDropHover = false
-    if (dropped && id && id !== root.moduleName && root.widgetIds.indexOf(id) === -1)
-      root.runLayout(["absorb", id])
+    if (!dropped || !id || id === root.moduleName) return
+    // Any bar icon may come in, also one more of a widget already inside.
+    if (entry !== "") root.runLayout(["absorb", id, "-1", "--entry-env"], { BAR_FOLDER_ENTRY: entry })
+    else root.runLayout(["absorb", id])
+  }
+
+  // Which entry with the slot's id the slot shows, counted from 0 in bar
+  // order, so a tile dropped next to one of several instances of a widget
+  // lands next to that one. -1 when it cannot be told.
+  function anchorPosition(slot) {
+    var layout = root.bar ? root.bar.layoutConfig : null
+    if (!slot || !layout) return -1
+    var id = String(slot.moduleName || "")
+    var want = JSON.stringify(slot.entry)
+    var region = String(slot.region || "")
+    var sections = ["left", "centerBegin", "center", "centerEnd", "right", "tray"]
+    var n = 0
+    for (var s = 0; s < sections.length; s++) {
+      var list = layout[sections[s]]
+      if (!list || typeof list === "string" || list.length === undefined) continue
+      for (var i = 0; i < list.length; i++) {
+        var entry = list[i]
+        var entryId = entry && typeof entry === "object" ? String(entry.id || "") : String(entry || "")
+        if (entryId !== id) continue
+        if (sections[s] === region && JSON.stringify(entry) === want) return n
+        n++
+      }
+    }
+    return -1
   }
 
   function slotPointer(slot) {
@@ -300,7 +388,7 @@ Panel {
       // layout signal does not reach third-party widgets reliably, so refresh
       // the list when an entry died and every couple of seconds while idle.
       root.idleTicks++
-      if (stale || root.idleTicks >= 12) {
+      if (stale || root.idleTicks >= 3) {
         root.idleTicks = 0
         root.collectBarSlots()
       }
@@ -310,9 +398,12 @@ Panel {
     root.finishBarDrag()
   }
 
+  // A drag starts through the slots' dragSourceChanged signal (watchSlot), so
+  // while idle this timer only keeps the slot list fresh and can tick slowly;
+  // during a drag it follows the pointer for the drop highlight.
   Timer {
     id: dragWatch
-    interval: root.barDragging ? 30 : 150
+    interval: root.barDragging ? 30 : 600
     running: true
     repeat: true
     onTriggered: root.pollBarDrag()
@@ -355,14 +446,47 @@ Panel {
     // Offset of the bar window inside the full-screen panel window.
     var ox = position === "right" ? screenW - barW : 0
     var oy = position === "bottom" ? screenH - barH : 0
-    return { window: window, position: position, vertical: vertical, x: ox, y: oy, width: barW, height: barH }
+    // Since Omarchy 4.5 the bar's window spans its whole screen (only the
+    // strip is reserved and takes input), so the window's size no longer says
+    // where the strip ends. The bar's own slots, the folder icon among them,
+    // do: the strip runs from the screen edge to their far side.
+    var lo = Infinity
+    var hi = -Infinity
+    var items = root.barSlots.concat([button])
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i]
+      try {
+        if (!item || !item.visible || item.width <= 0 || item.height <= 0) continue
+        if (item !== button && window && root.bar && typeof root.bar.targetBelongsToWindow === "function"
+            && !root.bar.targetBelongsToWindow(item, window)) continue
+        var pos = item.mapToItem(null, 0, 0)
+        var start = vertical ? pos.x : pos.y
+        lo = Math.min(lo, start)
+        hi = Math.max(hi, start + (vertical ? item.width : item.height))
+      } catch (e) {
+      }
+    }
+    var across = vertical ? barW : barH
+    var reach = Style.space(6)
+    var stripStart = 0
+    var stripEnd = across
+    if (hi > lo) {
+      if (position === "top" || position === "left") stripEnd = Math.min(across, hi + reach)
+      else stripStart = Math.max(0, lo - reach)
+    }
+    return {
+      window: window, position: position, vertical: vertical, x: ox, y: oy, width: barW, height: barH,
+      stripStart: stripStart, stripEnd: stripEnd
+    }
   }
 
   function barDropAt(scene) {
     var geo = root.barGeometry()
     if (!geo.window) return null
-    var inBar = scene.x >= geo.x && scene.x <= geo.x + geo.width
-      && scene.y >= geo.y && scene.y <= geo.y + geo.height
+    var along = geo.vertical ? scene.y - geo.y : scene.x - geo.x
+    var cross = geo.vertical ? scene.x - geo.x : scene.y - geo.y
+    var inBar = along >= 0 && along <= (geo.vertical ? geo.height : geo.width)
+      && cross >= geo.stripStart && cross <= geo.stripEnd
     if (!inBar) return null
 
     var axis = geo.vertical ? scene.y - geo.y : scene.x - geo.x
@@ -385,6 +509,7 @@ Panel {
           best = {
             kind: "bar",
             anchor: String(slot.moduleName),
+            slot: slot,
             after: after < before,
             along: (after < before ? start + size : start),
             cross: geo.vertical ? pos.x : pos.y,
@@ -395,6 +520,7 @@ Panel {
       }
     }
     if (!best) return { kind: "outside" }
+    best.nth = root.anchorPosition(best.slot)
     best.x = geo.vertical ? geo.x + best.cross : geo.x + best.along
     best.y = geo.vertical ? geo.y + best.along : geo.y + best.cross
     best.vertical = geo.vertical
@@ -434,18 +560,33 @@ Panel {
     root.tileDropTarget = null
     if (index < 0 || index >= root.resolved.length || !target) return
     var id = String(root.resolved[index].id)
+    // Tiles are named by position (--from), so the dragged one of several
+    // instances of a widget moves; layout.sh checks it still holds `id`.
+    var from = ["--from", String(index)]
 
     if (target.kind === "tile") {
-      if (target.index !== index) root.runLayout(["reorder", id, String(target.index)])
+      if (target.index !== index) root.runLayout(["reorder", id, String(target.index)].concat(from))
       return
     }
-    root.pendingOut = root.pendingOut.concat([id])
+    root.pendingOut = root.pendingOut.concat([index])
+    pendingOutReset.restart()
     if (target.kind === "bar") {
-      root.runLayout(["release", id, target.anchor, target.after ? "after" : "before"])
+      var args = ["release", id, target.anchor, target.after ? "after" : "before"]
+      if (target.nth >= 0) args.push(String(target.nth))
+      root.runLayout(args.concat(from))
     } else {
-      root.runLayout(["release", id])
+      root.runLayout(["release", id].concat(from))
     }
     if (root.resolved.length <= 1) root.close()
+  }
+
+  // A tile dragged out stays hidden (by position) until the new layout
+  // arrives; should layout.sh fail (it says so in a notification), show it
+  // again.
+  Timer {
+    id: pendingOutReset
+    interval: 5000
+    onTriggered: root.pendingOut = []
   }
 
   function cancelTileDrag() {
@@ -468,14 +609,81 @@ Panel {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        var key = root.resolvingKey
+        root.resolvingKey = ""
+        var list = []
         try {
-          var list = JSON.parse(String(text || "[]"))
-          root.resolved = Array.isArray(list) ? list : []
+          var parsed = JSON.parse(String(text || "[]"))
+          list = Array.isArray(parsed) ? parsed : []
         } catch (e) {
           console.warn("Bar Folder: could not resolve widgets:", e)
-          root.resolved = []
         }
+        root.resolved = list
+        root.resolvedKey = key
+        // The widget list changed while this run was busy: resolve it again.
+        if (key !== JSON.stringify(root.widgetIds)) Qt.callLater(root.resolveWidgets)
       }
+    }
+  }
+
+  // A tile's icon; the drag ghost uses it too. In this order: the glyph the
+  // widget draws on the bar, its drawn bar icon (iconComponent), the `icons`
+  // setting, a picture of its bar button, a generic glyph. Drawn icons and
+  // pictures come in the tile's colors (HostedWidget.tileForeground).
+  component TileIcon: Item {
+    id: tileIcon
+
+    property var host: null
+    property bool failed: false
+    property string override: ""
+    property color glyphColor: Commons.Color.popups.text
+    property real glyphSize: Style.font.iconLarge
+
+    // From bar size to this icon's size: the ratio a glyph grows by.
+    readonly property real barScale: glyphSize / Style.bar.iconFont
+    readonly property string hostGlyph: !failed && host && host.glyph ? String(host.glyph) : ""
+    readonly property bool drawn: !failed && hostGlyph === "" && !!host && !!host.iconComponent
+    readonly property bool pictured: !failed && hostGlyph === "" && !drawn && override === ""
+      && !!host && host.snapshotUrl !== ""
+    readonly property string glyph: {
+      if (failed) return "󰀦"
+      if (hostGlyph !== "") return hostGlyph
+      if (drawn) return ""
+      if (override !== "") return override
+      return pictured ? "" : "󰐱"
+    }
+
+    Text {
+      anchors.centerIn: parent
+      visible: tileIcon.glyph !== ""
+      text: tileIcon.glyph
+      textFormat: Text.PlainText
+      color: tileIcon.glyphColor
+      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+      font.pixelSize: tileIcon.glyphSize
+    }
+
+    // The widget's own bar icon, on the bar's icon canvas and scaled like a glyph.
+    Loader {
+      anchors.centerIn: parent
+      active: tileIcon.drawn
+      width: Style.bar.iconCanvas
+      height: Style.bar.iconCanvas
+      scale: tileIcon.barScale
+      sourceComponent: tileIcon.drawn ? tileIcon.host.iconComponent : null
+    }
+
+    // A picture of the bar button at its bar size, scaled like a glyph.
+    Image {
+      anchors.centerIn: parent
+      visible: tileIcon.pictured
+      width: tileIcon.pictured ? tileIcon.host.snapshotSize.width * tileIcon.barScale : 0
+      height: tileIcon.pictured ? tileIcon.host.snapshotSize.height * tileIcon.barScale : 0
+      source: tileIcon.pictured ? tileIcon.host.snapshotUrl : ""
+      fillMode: Image.PreserveAspectFit
+      cache: false
+      smooth: true
+      mipmap: true
     }
   }
 
@@ -549,7 +757,9 @@ Panel {
       model: root.resolved
 
       delegate: HostedWidget {
+        id: hosted
         required property var modelData
+        required property int index
         anchors.fill: parent
         widgetId: String(modelData.id)
         pluginId: String(modelData.pluginId || modelData.id)
@@ -557,9 +767,9 @@ Panel {
         source: String(modelData.url || "")
         builtin: modelData.builtin === true
         realBar: root.bar
-        widgetSettings: root.widgetSettings && root.widgetSettings[modelData.id]
-          ? root.widgetSettings[modelData.id] : ({})
-        onSettingsPersisted: function(id, values) { root.persistWidgetSettings(id, values) }
+        showing: root.opened
+        widgetSettings: root.settingsAt(hosted.index)
+        onSettingsPersisted: function(id, values) { root.persistWidgetSettings(hosted.index, values) }
         onCloseFolderRequested: root.close()
       }
     }
@@ -680,31 +890,39 @@ Panel {
                 || (root.cursorActive && root.selectedIndex === tile.index)
               readonly property bool lit: !!host && (host.active || host.opened)
               readonly property bool dimmed: !tile.failed && host.dimmed && !tile.lit
-              // No glyph, but a drawn bar icon: the tile shows the drawing.
-              readonly property bool drawn: !tile.failed && !host.glyph && !!host.iconComponent
-              readonly property string title: root.titleFor(modelData)
-              readonly property string glyph: {
-                if (tile.failed) return "󰀦"
-                if (host.glyph) return host.glyph
-                return root.icons && root.icons[modelData.id] ? String(root.icons[modelData.id]) : "󰐱"
-              }
+              readonly property string title: root.titleFor(modelData, tile.host)
               readonly property string status: tile.failed ? "Failed to load" : root.statusLine(host.status, tile.title)
 
               readonly property bool dragged: root.tileDragIndex === tile.index
               readonly property bool dropTarget: !!root.tileDropTarget && root.tileDropTarget.kind === "tile"
                 && root.tileDropTarget.index === tile.index && root.tileDragIndex !== tile.index
+              // The dragged tile takes this tile's place: it lands after it
+              // when it comes from further back, before it otherwise.
+              readonly property bool dropAfter: tile.dropTarget && root.tileDragIndex < tile.index
 
-              visible: root.pendingOut.indexOf(String(modelData.id)) === -1
+              visible: root.pendingOut.indexOf(tile.index) === -1
               width: root.tileWidth
               height: root.tileHeight
               clip: true
               radius: Style.cornerRadius
               opacity: tile.dragged ? 0.35 : 1
               color: Util.alpha(Commons.Color.popups.text, tile.highlighted && root.tileDragIndex < 0 ? 0.13 : 0.06)
-              border.width: tile.dropTarget || (root.cursorActive && root.selectedIndex === tile.index) ? Math.max(1, Style.space(1)) : 0
+              border.width: root.cursorActive && root.selectedIndex === tile.index ? Math.max(1, Style.space(1)) : 0
               border.color: Commons.Color.accent
 
               Behavior on color { ColorAnimation { duration: 120 } }
+
+              // Where the dragged tile will land.
+              Rectangle {
+                z: 2
+                visible: tile.dropTarget
+                width: Math.max(3, Style.space(4))
+                height: parent.height - Style.space(12)
+                anchors.verticalCenter: parent.verticalCenter
+                x: tile.dropAfter ? parent.width - width - Style.space(3) : Style.space(3)
+                radius: width / 2
+                color: Commons.Color.accent
+              }
 
               Rectangle {
                 id: badge
@@ -718,27 +936,14 @@ Panel {
 
                 Behavior on color { ColorAnimation { duration: 120 } }
 
-                Text {
-                  anchors.centerIn: parent
-                  visible: !tile.drawn
-                  text: tile.glyph
-                  textFormat: Text.PlainText
-                  color: tile.failed ? Commons.Color.urgent : (tile.lit ? Commons.Color.popups.background : Commons.Color.popups.text)
+                TileIcon {
+                  anchors.fill: parent
+                  host: tile.host
+                  failed: tile.failed
+                  override: root.icons && root.icons[tile.modelData.id] ? String(root.icons[tile.modelData.id]) : ""
+                  glyphColor: tile.failed ? Commons.Color.urgent : (tile.lit ? Commons.Color.popups.background : Commons.Color.popups.text)
+                  glyphSize: Style.font.iconLarge
                   opacity: tile.dimmed ? 0.45 : 1
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                  font.pixelSize: Style.font.iconLarge
-                }
-
-                // The widget's own bar icon, on the bar's icon canvas and
-                // scaled by the same ratio as a glyph from bar to tile.
-                Loader {
-                  anchors.centerIn: parent
-                  active: tile.drawn
-                  width: Style.bar.iconCanvas
-                  height: Style.bar.iconCanvas
-                  scale: Style.font.iconLarge / Style.bar.iconFont
-                  opacity: tile.dimmed ? 0.45 : 1
-                  sourceComponent: tile.drawn ? tile.host.iconComponent : null
                 }
               }
 
@@ -835,7 +1040,13 @@ Panel {
           visible: root.configured && root.resolved.length > 0
           horizontalAlignment: Text.AlignHCenter
           elide: Text.ElideRight
-          text: root.tileDragIndex >= 0 ? "Drop on the bar to take it out" : "Drag tiles to reorder or out to the bar"
+          text: {
+            if (root.tileDragIndex < 0) return "Drag tiles to reorder or out to the bar"
+            var target = root.tileDropTarget
+            if (target && target.kind === "tile") return target.index === root.tileDragIndex ? "Drop on another tile to move it there" : "Drop to move it here"
+            if (target && (target.kind === "bar" || target.kind === "outside")) return "Drop to put it back on the bar"
+            return "Drop on a tile to move it there, or on the bar to take it out"
+          }
           color: Commons.Color.popups.text
           opacity: 0.45
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -882,38 +1093,23 @@ Panel {
           anchors.centerIn: parent
           spacing: Style.space(8)
 
-          Loader {
+          TileIcon {
             readonly property var ghost: parent.parent
             anchors.verticalCenter: parent.verticalCenter
-            active: !!ghost.host && !ghost.host.glyph && !!ghost.host.iconComponent
-            visible: active
-            width: Style.bar.iconCanvas
-            height: Style.bar.iconCanvas
-            scale: Style.font.icon / Style.bar.iconFont
-            sourceComponent: active ? ghost.host.iconComponent : null
-          }
-
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: text !== ""
-            text: {
-              var ghost = parent.parent
-              if (ghost.host && ghost.host.glyph) return ghost.host.glyph
-              if (ghost.host && ghost.host.iconComponent) return ""
-              var id = ghost.item ? ghost.item.id : ""
-              return root.icons && root.icons[id] ? String(root.icons[id]) : "\udb81\udc31"
-            }
-            textFormat: Text.PlainText
-            color: Commons.Color.popups.text
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.icon
+            width: Math.ceil(Style.font.icon * 1.4)
+            height: width
+            host: ghost.host
+            failed: !ghost.host || ghost.host.failed
+            override: ghost.item && root.icons && root.icons[ghost.item.id] ? String(root.icons[ghost.item.id]) : ""
+            glyphColor: Commons.Color.popups.text
+            glyphSize: Style.font.icon
           }
 
           Text {
             anchors.verticalCenter: parent.verticalCenter
             text: {
               var ghost = parent.parent
-              var title = root.titleFor(ghost.item)
+              var title = root.titleFor(ghost.item, ghost.host)
               if (!ghost.leaving) return title
               return ghost.item && ghost.item.builtin ? title + "  \u2192 remove" : title + "  \u2192 bar"
             }

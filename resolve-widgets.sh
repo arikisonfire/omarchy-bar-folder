@@ -7,7 +7,8 @@
 # Resolution follows the shell's plugin registry, so hosting a widget in the
 # folder never loads code the shell itself would refuse to load:
 #   - manifests are validated the same way (schemaVersion, id, kind
-#     `bar-widget`, relative entry points without `..`);
+#     `bar-widget`, relative entry points without `..`, a valid
+#     `barWidget.defaultSection`);
 #   - plugins listed in `disabledPlugins` are not loaded;
 #   - first-party plugins win; third-party plugins cannot claim an
 #     `omarchy.*` id or the id of a first-party plugin;
@@ -34,13 +35,20 @@ emit() {
   jq -c --arg dir "$(dirname -- "$file")" --arg kind "$kind" '
     def safe_entry: type == "string" and length > 0
       and (startswith("/") | not) and (contains("..") | not);
+    # Omarchy 4.5 rejects the whole manifest when barWidget.defaultSection is
+    # set to anything but a bar section.
+    def valid_default_section:
+      (.barWidget | if type == "object" and has("defaultSection")
+        then (.defaultSection | tostring | IN("left", "centerBegin", "center", "centerEnd", "right", "tray"))
+        else true end);
     select(type == "object"
       and .schemaVersion == 1
       and (.id | type == "string" and length > 0 and (contains("/") | not) and (contains("..") | not))
       and .name != null and .version != null
       and (.kinds | type == "array" and index("bar-widget") != null)
       and (.entryPoints | type == "object" and ([.[] | safe_entry] | all))
-      and (.entryPoints.barWidget | type == "string"))
+      and (.entryPoints.barWidget | type == "string")
+      and valid_default_section)
     | {
         id,
         firstParty: ($kind == "firstparty"),

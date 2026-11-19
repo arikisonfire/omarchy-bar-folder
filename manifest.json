@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.arikisonfire.bar-folder",
   "name": "Bar Folder",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "arikisonfire",
   "license": "MIT",
   "description": "A simple folder for your bar icons: drag plugins in and out so the bar never gets too cluttered",

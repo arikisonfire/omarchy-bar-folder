@@ -32,16 +32,86 @@ Item {
 
   readonly property var widget: loader.item
   readonly property bool failed: !builtin && (String(source) === "" || loader.status === Loader.Error)
+  // Set by Bar Folder while its panel (and so this widget's tile) is open.
+  property bool showing: false
+  // The buttons the widget registers with its bar.
   property var targets: []
+  // A visible item inside the widget that offers triggerPress without being
+  // registered, e.g. a tray icon; see scanTree().
+  property var treeTarget: null
 
-  // The first registered button is the one the widget draws in the bar.
+  // The test the bar applies before it presses a button (Bar.qml,
+  // moduleTargetClickable).
+  function clickable(target) {
+    return !!target
+      && target.visible !== false
+      && target.opacity !== 0
+      && target.interactive !== false
+      && target.pressable !== false
+      && target.concealed !== true
+      && typeof target.triggerPress === "function"
+  }
+
+  // The button the tile stands for, in this order:
+  //   1. a registered button the bar itself would press;
+  //   2. a visible item in the widget that offers triggerPress (a tray icon);
+  //   3. a registered button that is only hidden for now: concealed, or hidden
+  //      by the widget itself, as icons shown only at night or while active are.
+  // A button in a part of the widget that is not shown at all, such as the
+  // chevron of a closed drawer, never stands for the widget: its glyph and its
+  // click would be the wrong ones.
   readonly property var primaryTarget: {
-    for (var i = 0; i < targets.length; i++) {
-      var target = targets[i]
-      if (target && typeof target.triggerPress === "function") return target
+    var list = targets
+    var i
+    for (i = 0; i < list.length; i++) if (clickable(list[i])) return list[i]
+    var found = treeTarget
+    if (found && clickable(found)) return found
+    for (i = 0; i < list.length; i++) {
+      var target = list[i]
+      if (!target || typeof target.triggerPress !== "function") continue
+      if (target.visible !== false) return target
+      if (target.parent && target.parent.visible !== false) return target
     }
     return null
   }
+
+  // Finds the first visible item in the widget that can be pressed like a bar
+  // button. Run on load, when the folder opens and when the widget changes
+  // size (a tray icon appearing, say), not as a binding: it walks the tree.
+  function scanTree() {
+    var item = loader.item
+    if (root.builtin || !item) {
+      root.treeTarget = null
+      return
+    }
+    var queue = [item]
+    for (var seen = 0; queue.length > 0 && seen < 600; seen++) {
+      var node = queue.shift()
+      if (!node || node.visible === false) continue
+      if (node !== item && root.clickable(node)) {
+        root.treeTarget = node
+        return
+      }
+      var kids = node.children
+      if (kids) for (var i = 0; i < kids.length; i++) queue.push(kids[i])
+    }
+    root.treeTarget = null
+  }
+
+  Timer {
+    id: treeScan
+    interval: 250
+    onTriggered: root.scanTree()
+  }
+
+  Connections {
+    target: root.widget
+    ignoreUnknownSignals: true
+    function onImplicitWidthChanged() { treeScan.restart() }
+    function onImplicitHeightChanged() { treeScan.restart() }
+  }
+
+  onTargetsChanged: treeScan.restart()
 
   readonly property string glyph: {
     if (widgetId === "builtin.notifications") return notifications.dnd ? "󰂛" : "󰂚"
@@ -78,6 +148,45 @@ Item {
   // Greyed out on the bar, the stock "off" look; the tile follows.
   readonly property bool dimmed: primaryTarget ? primaryTarget.dimmed === true : false
   readonly property bool opened: widget ? widget.opened === true : false
+  // The tile stands for this widget, so the widget draws its icon in the
+  // tile's colors: hostBar.barForeground below, which bar icons draw with.
+  // On the bar it is a contrast color for the bar background; here the
+  // background is the tile, accent-colored while the widget is lit.
+  readonly property color tileForeground: (active || opened) ? Commons.Color.popups.background : Commons.Color.popups.text
+
+  // Last resort for a button that draws neither a glyph nor an iconComponent
+  // (an image, say): a picture of it. It is taken in the bar's window, as the
+  // tiles live in another window (the folder panel), and refreshed while the
+  // folder is open. The result object keeps the picture alive.
+  readonly property bool wantsSnapshot: !builtin && !!primaryTarget && !glyph && !iconComponent
+    && primaryTarget.width > 0 && primaryTarget.height > 0
+    && typeof primaryTarget.grabToImage === "function"
+  property var snapshot: null
+  readonly property string snapshotUrl: snapshot && wantsSnapshot ? String(snapshot.url) : ""
+  // Bar size of the pictured button, so the tile can scale it like a glyph.
+  readonly property size snapshotSize: primaryTarget && wantsSnapshot
+    ? Qt.size(primaryTarget.width, primaryTarget.height) : Qt.size(0, 0)
+
+  function takeSnapshot() {
+    var target = root.primaryTarget
+    if (!root.wantsSnapshot || !target) {
+      root.snapshot = null
+      return
+    }
+    target.grabToImage(function(result) {
+      if (root.primaryTarget === target) root.snapshot = result
+    }, Qt.size(Math.ceil(target.width * 4), Math.ceil(target.height * 4)))
+  }
+
+  onWantsSnapshotChanged: Qt.callLater(root.takeSnapshot)
+  onShowingChanged: if (showing) Qt.callLater(root.takeSnapshot)
+
+  Timer {
+    interval: 1500
+    repeat: true
+    running: root.showing && root.wantsSnapshot
+    onTriggered: root.takeSnapshot()
+  }
   readonly property string status: {
     if (widgetId === "builtin.notifications") return notifications.dnd ? "Do Not Disturb" : "On"
     if (primaryTarget && primaryTarget.tooltipText) return String(primaryTarget.tooltipText)
@@ -90,6 +199,7 @@ Item {
 
   function refresh() {
     if (widgetId === "builtin.notifications") notifications.call("isDnd")
+    else root.scanTree()
   }
 
   function press(button) {
@@ -102,8 +212,10 @@ Item {
       }
       return true
     }
-    if (primaryTarget) {
-      primaryTarget.triggerPress(button)
+    if (!primaryTarget) root.scanTree()
+    var target = primaryTarget
+    if (target) {
+      target.triggerPress(button)
       return true
     }
     if (button !== Qt.LeftButton) return false
@@ -245,7 +357,7 @@ Item {
     readonly property string moduleName: root.widgetId
 
     readonly property color foreground: root.realBar ? root.realBar.foreground : Commons.Color.foreground
-    readonly property color barForeground: root.realBar ? root.realBar.barForeground : Commons.Color.foreground
+    readonly property color barForeground: root.tileForeground
     readonly property color background: root.realBar ? root.realBar.background : Commons.Color.background
     readonly property color urgent: root.realBar ? root.realBar.urgent : Commons.Color.urgent
     readonly property string fontFamily: root.realBar ? root.realBar.fontFamily : Style.font.family
@@ -296,6 +408,7 @@ Item {
       injectProps()
       // Twice, as the bar does: root bindings can read `bar` before assignment.
       Qt.callLater(injectProps)
+      treeScan.restart()
     }
     onStatusChanged: if (status === Loader.Error) console.warn("Bar Folder: failed to load " + root.widgetId + " from " + root.source)
 
