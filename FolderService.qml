@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import qs.Commons as Commons
 
 // Runs the services of plugins that live inside the folder.
 //
@@ -160,10 +161,19 @@ Item {
         Quickshell.execDetached(["omarchy-shell", "-q", "io.github.arikisonfire.bar-folder", method, pluginId])
         return true
       }
+      // A call for another plugin goes to the shell's IPC registry in this
+      // process, so its payload never becomes a process argument that other
+      // local accounts could read in /proc (see HostedWidget.execShell).
       function shellCall(method, id, payloadJson) {
-        var command = ["omarchy-shell", "-q", "shell", method, String(id || "")]
-        if (payloadJson !== undefined) command.push(String(payloadJson || "{}"))
-        Quickshell.execDetached(command)
+        var target = String(id || "")
+        var args = [target]
+        if (method !== "hide") args.push(payloadJson === undefined || payloadJson === null || payloadJson === "" ? "{}" : String(payloadJson))
+        try {
+          var result = Commons.IpcRegistry.call("shell", method, args)
+          if (result && result.ran) return method === "summon" ? result.output === "ok" : true
+        } catch (e) {
+        }
+        Quickshell.execDetached(["omarchy-shell", "-q", "shell", method, target])
         return true
       }
 

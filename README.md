@@ -156,7 +156,7 @@ tests/test-layout.sh             # layout changes, against copies of shell.json
 tests/test-resolve-widgets.sh    # which widgets may load
 ```
 
-Both run in a temporary directory and never touch your configuration or the running shell.
+Both run in a temporary directory and never touch your configuration or the running shell. They also record the arguments of the commands the scripts start and check that no widget setting shows up there. The widget loading test also checks for plugin folders and the folder's widget list.
 
 ## How it works
 
@@ -168,8 +168,8 @@ Both run in a temporary directory and never touch your configuration or the runn
 - The shell only runs a plugin's service while that plugin is on the bar. For plugins inside the folder, Bar Folder's own service starts it instead, exactly once no matter how many bars you have, and hands it only to that plugin's widget. As soon as the plugin is back on the bar, the shell takes over again. Lock and polkit clones and `keepLoaded` services are never started by Bar Folder.
 - Plugins inside the folder share the folder's part of the shell, much like widgets on the bar share the bar. Only put plugins in the folder that you would also trust on your bar.
 - Tile subtitles show the first line of a plugin's tooltip, so long or multi-line tooltips never overflow a tile.
-- Widgets are resolved the same way the shell resolves plugins: manifests are validated, entry points must stay inside their plugin directory, third-party plugins cannot take over `omarchy.*` or other first-party ids, and a local clone only replaces a built-in when that clone is enabled. Tile titles are rendered as plain text.
-- The settings of a widget you drag in reach the helper script in an environment variable, never on its command line, which other local accounts could read.
+- Widgets are resolved the same way the shell resolves plugins: manifests are validated, entry points must stay inside their plugin directory, third-party plugins cannot take over `omarchy.*` or other first-party ids, and a clone (as `omarchy plugin clone` makes it) only replaces a built-in, and only while that clone is enabled. A plugin that names another plugin as its source never takes over that plugin's tile or its settings. Tile titles are rendered as plain text.
+- Nothing from your configuration goes on a command line, which other local accounts could read in the process list. The settings of a widget you drag in reach the helper script in an environment variable. The folder's widget list reaches `resolve-widgets.sh` in its environment, and `shell.json` and the plugin manifests reach `jq` on its standard input. When a widget in the folder opens another plugin's panel, such as the network widget opening the Wi-Fi share card, the call goes to the shell's IPC inside the shell, the way `omarchy-shell` delivers it, so its details never appear in a process list.
 
 ## License
 

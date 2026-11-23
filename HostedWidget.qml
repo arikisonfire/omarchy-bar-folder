@@ -250,10 +250,22 @@ Item {
     return false
   }
 
+  // A call for another plugin (the network widget opening the Wi-Fi share
+  // card, say) goes to the shell's IPC registry in this process, the way
+  // omarchy-shell delivers it. So its payload, such as a Wi-Fi name, never
+  // becomes a process argument that other local accounts could read in /proc.
+  // Without the registry (before Omarchy 4.5) omarchy-shell gets the call
+  // without its payload.
   function execShell(method, id, payload) {
-    var command = ["omarchy-shell", "-q", "shell", method, String(id || "")]
-    if (payload !== undefined) command.push(String(payload || "{}"))
-    Quickshell.execDetached(command)
+    var target = String(id || "")
+    var args = [target]
+    if (method !== "hide") args.push(payload === undefined || payload === null || payload === "" ? "{}" : String(payload))
+    try {
+      var result = Commons.IpcRegistry.call("shell", method, args)
+      if (result && result.ran) return method === "summon" ? result.output === "ok" : true
+    } catch (e) {
+    }
+    Quickshell.execDetached(["omarchy-shell", "-q", "shell", method, target])
     return true
   }
 

@@ -141,7 +141,11 @@ Panel {
     }
     root.resolvingKey = key
     var script = String(Qt.resolvedUrl("resolve-widgets.sh")).replace(/^file:\/\//, "")
-    resolver.command = [script].concat(root.widgetIds)
+    // The folder's widget list travels in the environment, never as
+    // arguments: other local accounts can read a process's arguments in
+    // /proc, not its environment.
+    resolver.command = [script]
+    resolver.environment = { BAR_FOLDER_WIDGETS: key }
     resolver.running = true
   }
 
